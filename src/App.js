@@ -1,10 +1,12 @@
-// src/App.js
 import React, { useState } from 'react';
 import JSZip from 'jszip';
 
 function App() {
   const [files, setFiles] = useState([]);
-  const [tableData, setTableData] = useState([]);
+  const [trackRanking, setTrackRanking] = useState([]);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 20;
 
   const handleFileChange = async (event) => {
     const file = event.target.files[0];
@@ -13,70 +15,140 @@ function App() {
     const zip = new JSZip();
     const zipContent = await zip.loadAsync(file);
     const entries = [];
+    const combinedData = [];
 
     for (const filename of Object.keys(zipContent.files)) {
-      const fileObj = zipContent.files[filename];
-      if (!fileObj.dir && filename.endsWith('.json')) {
+      if (
+        filename.endsWith('.json') &&
+        filename.includes('Streaming_History_Audio') &&
+        !filename.includes('Video')
+      ) {
+        const fileObj = zipContent.files[filename];
         const content = await fileObj.async('string');
-        entries.push({ name: filename, content });
+
+        try {
+          const json = JSON.parse(content);
+          combinedData.push(...json);
+          entries.push({ name: filename, content });
+        } catch (e) {
+          console.error('JSON parse error in:', filename, e);
+        }
       }
     }
 
+    // 曲ごとの集計
+    const countMap = {};
+    const trackInfoMap = {};
+
+    for (const item of combinedData) {
+      const uri = item.spotify_track_uri || 'unknown_uri';
+      countMap[uri] = (countMap[uri] || 0) + 1;
+
+      if (!trackInfoMap[uri]) {
+        trackInfoMap[uri] = {
+          name: item.master_metadata_track_name || 'Unknown',
+          artist: item.master_metadata_album_artist_name || 'Unknown',
+          album: item.master_metadata_album_album_name || 'Unknown',
+        };
+      }
+    }
+
+    const ranking = Object.entries(countMap)
+      .sort((a, b) => b[1] - a[1])
+      .map(([uri, count]) => ({
+        uri,
+        count,
+        name: trackInfoMap[uri].name,
+        artist: trackInfoMap[uri].artist,
+        album: trackInfoMap[uri].album,
+      }));
+
     setFiles(entries);
-    setTableData([]); // 表データは初期化
+    setTrackRanking(ranking);
+    setCurrentPage(1);
   };
 
-  const handleSelectFile = (content) => {
-    try {
-      const json = JSON.parse(content);
-      const filtered = json.map((item) => ({
-        track: item.master_metadata_track_name || '',
-        artist: item.master_metadata_album_artist_name || '',
-        album: item.master_metadata_album_album_name || '',
-      }));
-      setTableData(filtered);
-    } catch (e) {
-      console.error('Invalid JSON format', e);
-    }
-  };
+  const filteredRanking = trackRanking.filter((item) =>
+    item.artist.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
+  const paginatedRanking = filteredRanking.slice(
+    (currentPage - 1) * itemsPerPage,
+    currentPage * itemsPerPage
+  );
+
+  const totalPages = Math.ceil(filteredRanking.length / itemsPerPage);
 
   return (
     <div style={{ padding: 20 }}>
-      <h1>My Spotify Data Viewer</h1>
+      <h1>My Spotify Top Tracks</h1>
       <input type="file" onChange={handleFileChange} />
 
-      <h3>Available JSON Files:</h3>
+      <h3>Loaded JSON Files:</h3>
       <ul>
         {files.map((f, idx) => (
-          <li key={idx}>
-            <button onClick={() => handleSelectFile(f.content)}>
-              {f.name}
-            </button>
-          </li>
+          <li key={idx}>{f.name}</li>
         ))}
       </ul>
 
-      {tableData.length > 0 && (
+      {trackRanking.length > 0 && (
         <>
-          <h3>Streaming History Table</h3>
-          <table border="1" cellPadding="8" style={{ borderCollapse: 'collapse' }}>
+          <div style={{ margin: '20px 0' }}>
+            <label htmlFor="search">Search by Artist: </label>
+            <input
+              type="text"
+              id="search"
+              placeholder="e.g. 米津玄師"
+              value={searchTerm}
+              onChange={(e) => {
+                setSearchTerm(e.target.value);
+                setCurrentPage(1);
+              }}
+              style={{ padding: '5px', width: '300px' }}
+            />
+          </div>
+
+          <h3>Top Tracks (Page {currentPage} / {totalPages})</h3>
+          <table border="1" cellPadding="8" style={{ borderCollapse: 'collapse', width: '100%' }}>
             <thead>
               <tr>
+                <th>Rank</th>
                 <th>Track Name</th>
                 <th>Artist</th>
                 <th>Album</th>
+                <th>Plays</th>
               </tr>
             </thead>
             <tbody>
-              {tableData.map((item, idx) => (
-                <tr key={idx}>
-                  <td>{item.track}</td>
+              {paginatedRanking.map((item, idx) => (
+                <tr key={item.uri}>
+                  <td>{(currentPage - 1) * itemsPerPage + idx + 1}</td>
+                  <td>{item.name}</td>
                   <td>{item.artist}</td>
                   <td>{item.album}</td>
+                  <td>{item.count}</td>
                 </tr>
               ))}
             </tbody>
           </table>
+
+          <div style={{ marginTop: 20 }}>
+            {Array.from({ length: totalPages }).map((_, idx) => (
+              <button
+                key={idx}
+                onClick={() => setCurrentPage(idx + 1)}
+                style={{
+                  margin: '0 5px',
+                  padding: '5px 10px',
+                  background: currentPage === idx + 1 ? '#ccc' : '#eee',
+                  border: '1px solid #999',
+                  cursor: 'pointer'
+                }}
+              >
+                {idx + 1}
+              </button>
+            ))}
+          </div>
         </>
       )}
     </div>
