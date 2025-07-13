@@ -5,6 +5,8 @@ function App() {
   const [files, setFiles] = useState([]);
   const [trackRanking, setTrackRanking] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 20;
 
@@ -36,11 +38,27 @@ function App() {
       }
     }
 
-    // 曲ごとの集計
+    setFiles(entries);
+    updateRanking(combinedData, searchTerm, startDate, endDate);
+  };
+
+  const updateRanking = (data, artistFilter, start, end) => {
     const countMap = {};
     const trackInfoMap = {};
 
-    for (const item of combinedData) {
+    const filteredData = data.filter((item) => {
+      const ts = new Date(item.ts);
+      const matchArtist = item.master_metadata_album_artist_name
+        ?.toLowerCase()
+        .includes(artistFilter.toLowerCase());
+
+      const matchStart = start ? ts >= new Date(start) : true;
+      const matchEnd = end ? ts <= new Date(end) : true;
+
+      return matchArtist && matchStart && matchEnd;
+    });
+
+    for (const item of filteredData) {
       const uri = item.spotify_track_uri || 'unknown_uri';
       countMap[uri] = (countMap[uri] || 0) + 1;
 
@@ -63,21 +81,36 @@ function App() {
         album: trackInfoMap[uri].album,
       }));
 
-    setFiles(entries);
     setTrackRanking(ranking);
     setCurrentPage(1);
   };
 
-  const filteredRanking = trackRanking.filter((item) =>
-    item.artist.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const handleFilterChange = (field, value) => {
+    if (field === 'artist') setSearchTerm(value);
+    if (field === 'start') setStartDate(value);
+    if (field === 'end') setEndDate(value);
+  };
 
-  const paginatedRanking = filteredRanking.slice(
+  const handleApplyFilter = () => {
+    // フィルター再適用
+    if (files.length === 0) return;
+    let combinedData = [];
+    for (const file of files) {
+      try {
+        const json = JSON.parse(file.content);
+        combinedData.push(...json);
+      } catch (e) {
+        console.error('Error parsing file:', file.name);
+      }
+    }
+    updateRanking(combinedData, searchTerm, startDate, endDate);
+  };
+
+  const paginatedRanking = trackRanking.slice(
     (currentPage - 1) * itemsPerPage,
     currentPage * itemsPerPage
   );
-
-  const totalPages = Math.ceil(filteredRanking.length / itemsPerPage);
+  const totalPages = Math.ceil(trackRanking.length / itemsPerPage);
 
   return (
     <div style={{ padding: 20 }}>
@@ -93,21 +126,41 @@ function App() {
 
       {trackRanking.length > 0 && (
         <>
+          {/* フィルター */}
           <div style={{ margin: '20px 0' }}>
-            <label htmlFor="search">Search by Artist: </label>
-            <input
-              type="text"
-              id="search"
-              placeholder="e.g. 米津玄師"
-              value={searchTerm}
-              onChange={(e) => {
-                setSearchTerm(e.target.value);
-                setCurrentPage(1);
-              }}
-              style={{ padding: '5px', width: '300px' }}
-            />
+            <label style={{ marginRight: 10 }}>
+              Artist:
+              <input
+                type="text"
+                value={searchTerm}
+                onChange={(e) => handleFilterChange('artist', e.target.value)}
+                style={{ marginLeft: 5 }}
+              />
+            </label>
+            <label style={{ marginRight: 10 }}>
+              Start Date:
+              <input
+                type="date"
+                value={startDate}
+                onChange={(e) => handleFilterChange('start', e.target.value)}
+                style={{ marginLeft: 5 }}
+              />
+            </label>
+            <label style={{ marginRight: 10 }}>
+              End Date:
+              <input
+                type="date"
+                value={endDate}
+                onChange={(e) => handleFilterChange('end', e.target.value)}
+                style={{ marginLeft: 5 }}
+              />
+            </label>
+            <button onClick={handleApplyFilter} style={{ marginLeft: 10 }}>
+              Apply Filter
+            </button>
           </div>
 
+          {/* ランキングテーブル */}
           <h3>Top Tracks (Page {currentPage} / {totalPages})</h3>
           <table border="1" cellPadding="8" style={{ borderCollapse: 'collapse', width: '100%' }}>
             <thead>
@@ -132,6 +185,7 @@ function App() {
             </tbody>
           </table>
 
+          {/* ページネーション */}
           <div style={{ marginTop: 20 }}>
             {Array.from({ length: totalPages }).map((_, idx) => (
               <button
